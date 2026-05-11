@@ -1,0 +1,1259 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  CLIENT
+  CONTRACTOR
+  COORDINATOR
+  PROCESSOR
+  ADMIN
+  ACCOUNTANT
+  CLIENT_MANAGER
+  PROCESSOR_INCHARGE
+  INCHARGE_COORDINATOR
+  INCHARGE_CLIENT_MANAGER
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  hashedPassword String?
+  image          String?
+  role           Role      @default(CLIENT)
+  phone          String?
+  company        String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts                Account[]
+  sessions                Session[]
+  assignedWorkOrders      WorkOrder[]             @relation("AssignedContractor")
+  coordinatedWorkOrders   WorkOrder[]             @relation("Coordinator")
+  processedWorkOrders     WorkOrder[]             @relation("Processor")
+  createdWorkOrders       WorkOrder[]             @relation("CreatedBy")
+  messages                Message[]
+  threadParticipants      ThreadParticipant[]
+  invoices                Invoice[]
+  supportTickets          SupportTicket[]         @relation("TicketCreator")
+  assignedTickets         SupportTicket[]         @relation("TicketAssignee")
+  ticketComments          TicketComment[]
+  notifications           Notification[]
+  fileUploads             FileUpload[]
+  activityLogs            ActivityLog[]
+  notificationPreferences NotificationPreference?
+  voiceProfiles           VoiceProfile[]
+  callLogs                CallLog[]               @relation("CallRecipient")
+  callLogsInitiated       CallLog[]               @relation("CallInitiator")
+  scheduledCalls          ScheduledCall[]         @relation("ScheduledCallRecipient")
+  scheduledCallsCreated   ScheduledCall[]         @relation("ScheduledCallCreator")
+  channelMembers          ChannelMember[]
+  chatMessages            ChatMessage[]
+  typingIndicators        TypingIndicator[]
+  messageReactions        MessageReaction[]
+  contractorBalance       ContractorBalance?
+  balanceTransactions     BalanceTransaction[]
+  disputesRaised          Dispute[]               @relation("DisputeRaised")
+  disputesAssigned        Dispute[]               @relation("DisputeAssigned")
+  withdrawals             Withdrawal[]
+
+  // Contractor Network
+  posts             Post[]             @relation("PostAuthor")
+  postComments      PostComment[]      @relation("CommentAuthor")
+  postReactions     PostReaction[]     @relation("ReactionUser")
+  jobRequests       JobRequest[]       @relation("JobRequester")
+  jobAssignments    JobRequest[]       @relation("JobAssignedTo")
+  jobApprovals      JobRequest[]       @relation("JobApprovedBy")
+  jobOffers         JobOffer[]         @relation("JobOfferor")
+  contractorProfile ContractorProfile? @relation("ContractorProfile")
+  ratingsGiven      Rating[]           @relation("RaterUser")
+  ratingsReceived   Rating[]           @relation("RatedUser")
+  postReports       PostReport[]       @relation("ReportReporter")
+  reviewedReports   PostReport[]       @relation("ReportReviewer")
+
+  @@index([role])
+  @@index([email])
+}
+
+// ─── Work Orders ─────────────────────────────────────────────────────────────
+
+enum WorkOrderStatus {
+  NEW
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  FIELD_COMPLETE
+  QC_REVIEW
+  PENDING_REVIEW
+  REVISIONS_NEEDED
+  OFFICE_COMPLETE
+  CLOSED
+  CANCELLED
+  ASSETS
+}
+
+enum ServiceType {
+  GRASS_CUT
+  DEBRIS_REMOVAL
+  WINTERIZATION
+  BOARD_UP
+  INSPECTION
+  MOLD_REMEDIATION
+  OTHER
+}
+
+enum FileCategory {
+  BEFORE
+  DURING
+  AFTER
+  BID
+  INSPECTION
+  PROPERTY_FRONT
+  DOCS
+}
+
+model WorkOrder {
+  id                  String          @id @default(cuid())
+  title               String
+  description         String?         @db.Text
+  address             String
+  city                String?
+  state               String?
+  zipCode             String?
+  latitude            Float?
+  longitude           Float?
+  serviceType         ServiceType
+  status              WorkOrderStatus @default(NEW)
+  priority            Int             @default(0)
+  dueDate             DateTime?
+  completedAt         DateTime?
+  lockCode            String?
+  gateCode            String?
+  keyCode             String?
+  specialInstructions String?         @db.Text
+  tasks               Json? // JSON array of task objects
+  metadata            Json? // flexible extra data
+
+  contractorId  String?
+  coordinatorId String?
+  processorId   String?
+  createdById   String?
+
+  contractor  User? @relation("AssignedContractor", fields: [contractorId], references: [id])
+  coordinator User? @relation("Coordinator", fields: [coordinatorId], references: [id])
+  processor   User? @relation("Processor", fields: [processorId], references: [id])
+  createdBy   User? @relation("CreatedBy", fields: [createdById], references: [id])
+
+  propertyId String?
+  property   Property? @relation(fields: [propertyId], references: [id])
+
+  files         FileUpload[]
+  threads       Thread[]
+  invoices      Invoice[]
+  history       ActivityLog[]
+  notifications Notification[]
+  disputes      Dispute[]
+
+  // Contractor Network
+  posts       Post[]
+  jobRequests JobRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([contractorId])
+  @@index([coordinatorId])
+  @@index([serviceType])
+  @@index([dueDate])
+  @@index([propertyId])
+}
+
+model Property {
+  id         String          @id @default(cuid())
+  address    String
+  city       String?
+  state      String?
+  zipCode    String?
+  latitude   Float?
+  longitude  Float?
+  imageUrl   String?
+  metadata   Json?
+  workOrders WorkOrder[]
+  photos     PropertyPhoto[]
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([address])
+}
+
+model PropertyPhoto {
+  id           String   @id @default(cuid())
+  propertyId   String
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  category     String   @default("FRONT") // FRONT, SIDE, BACK, etc.
+  uploaderId   String?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId])
+}
+
+model FileUpload {
+  id           String       @id @default(cuid())
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  category     FileCategory @default(DOCS)
+  workOrderId  String?
+  workOrder    WorkOrder?   @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  uploaderId   String?
+  uploader     User?        @relation(fields: [uploaderId], references: [id])
+  createdAt    DateTime     @default(now())
+
+  @@index([workOrderId])
+}
+
+// ─── Messaging ───────────────────────────────────────────────────────────────
+
+model Thread {
+  id          String     @id @default(cuid())
+  title       String?
+  isGeneral   Boolean    @default(false)
+  workOrderId String?
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  participants ThreadParticipant[]
+  messages     Message[]
+
+  @@index([workOrderId])
+}
+
+enum ParticipantRole {
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+model ThreadParticipant {
+  id       String          @id @default(cuid())
+  threadId String
+  userId   String
+  role     ParticipantRole @default(MEMBER)
+  follows  Boolean         @default(true)
+  blocked  Boolean         @default(false)
+  joinedAt DateTime        @default(now())
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@index([userId])
+}
+
+enum MessageVisibility {
+  INTERNAL
+  CONTRACTOR
+  CLIENT
+  SYSTEM
+  TASK_PARTICIPANTS
+}
+
+enum MessageType {
+  COMMENT
+  SYSTEM
+  REVISION
+  CLIENT_UPDATE
+  QC
+  BID
+  INSPECTION
+  ACCOUNTING
+  TASK
+  POLL
+}
+
+model Message {
+  id         String            @id @default(cuid())
+  content    String            @db.Text
+  type       MessageType       @default(COMMENT)
+  visibility MessageVisibility @default(INTERNAL)
+  isUrgent   Boolean           @default(false)
+  isPinned   Boolean           @default(false)
+  threadId   String
+  authorId   String
+  parentId   String? // for threading/replies
+
+  thread       Thread               @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author       User                 @relation(fields: [authorId], references: [id])
+  parent       Message?             @relation("MessageReplies", fields: [parentId], references: [id])
+  replies      Message[]            @relation("MessageReplies")
+  readReceipts MessageReadReceipt[]
+  attachments  MessageAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([threadId])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+model MessageReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+}
+
+model MessageAttachment {
+  id           String @id @default(cuid())
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  messageId    String
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+// ─── Finance ─────────────────────────────────────────────────────────────────
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  workOrderId     String?
+  workOrder       WorkOrder?    @relation(fields: [workOrderId], references: [id])
+  clientId        String
+  client          User          @relation(fields: [clientId], references: [id])
+  status          InvoiceStatus @default(DRAFT)
+  subtotal        Float         @default(0)
+  tax             Float         @default(0)
+  total           Float         @default(0)
+  noCharge        Boolean       @default(false)
+  notes           String?       @db.Text
+  dueDate         DateTime?
+  paidAt          DateTime?
+  stripePaymentId String?
+  stripeInvoiceId String?
+
+  items InvoiceItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+  @@index([workOrderId])
+}
+
+model InvoiceItem {
+  id              String  @id @default(cuid())
+  taskName        String?
+  description     String? @db.Text
+  quantity        Float   @default(1)
+  unitPrice       Float
+  discountPercent Float   @default(0)
+  amount          Float
+  invoiceId       String
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+// ─── Support ─────────────────────────────────────────────────────────────────
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+model SupportTicket {
+  id          String         @id @default(cuid())
+  subject     String
+  description String         @db.Text
+  priority    TicketPriority @default(MEDIUM)
+  status      TicketStatus   @default(OPEN)
+  category    String?
+  creatorId   String
+  creator     User           @relation("TicketCreator", fields: [creatorId], references: [id])
+  assigneeId  String?
+  assignee    User?          @relation("TicketAssignee", fields: [assigneeId], references: [id])
+
+  comments      TicketComment[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([creatorId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([priority])
+}
+
+model TicketComment {
+  id         String  @id @default(cuid())
+  content    String  @db.Text
+  ticketId   String
+  authorId   String
+  isInternal Boolean @default(false)
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User          @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+}
+
+// ─── System ──────────────────────────────────────────────────────────────────
+
+model Notification {
+  id          String         @id @default(cuid())
+  title       String
+  message     String
+  type        String
+  isRead      Boolean        @default(false)
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workOrderId String?
+  workOrder   WorkOrder?     @relation(fields: [workOrderId], references: [id])
+  ticketId    String?
+  ticket      SupportTicket? @relation(fields: [ticketId], references: [id])
+  createdAt   DateTime       @default(now())
+
+  @@index([userId, isRead])
+}
+
+model ActivityLog {
+  id          String     @id @default(cuid())
+  action      String
+  details     String?    @db.Text
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id])
+  workOrderId String?
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id])
+  createdAt   DateTime   @default(now())
+
+  @@index([workOrderId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ─── Notification Preferences ────────────────────────────────────────────────
+
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Channel toggles
+  messagesInApp Boolean @default(true)
+  messagesEmail Boolean @default(true)
+  messagesSms   Boolean @default(false)
+
+  workOrderStatusInApp Boolean @default(true)
+  workOrderStatusEmail Boolean @default(true)
+  workOrderStatusSms   Boolean @default(false)
+
+  dueOverdueInApp Boolean @default(true)
+  dueOverdueEmail Boolean @default(true)
+  dueOverdueSms   Boolean @default(true)
+
+  invoicesInApp Boolean @default(true)
+  invoicesEmail Boolean @default(true)
+  invoicesSms   Boolean @default(false)
+
+  supportInApp Boolean @default(true)
+  supportEmail Boolean @default(true)
+  supportSms   Boolean @default(false)
+
+  aiInApp Boolean @default(true)
+  aiEmail Boolean @default(false)
+  aiSms   Boolean @default(false)
+
+  // Quiet hours
+  quietHoursEnabled  Boolean @default(false)
+  quietHoursStart    String? // "22:00"
+  quietHoursEnd      String? // "07:00"
+  quietHoursTimezone String? @default("America/New_York")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Inspectors ──────────────────────────────────────────────────────────────
+
+enum InspectorSpecialtyType {
+  PLUMBER
+  ELECTRICIAN
+  HVAC
+  ROOFER
+  GENERAL
+  PEST_CONTROL
+  STRUCTURAL
+  ENVIRONMENTAL
+  SEPTIC
+  WELL
+  POOL
+  FIRE_SAFETY
+}
+
+enum InspectorAvailability {
+  AVAILABLE
+  BUSY
+  UNAVAILABLE
+}
+
+model Inspector {
+  id           String                @id @default(cuid())
+  name         String
+  email        String?
+  phone        String?
+  company      String?
+  bio          String?               @db.Text
+  imageUrl     String?
+  address      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  latitude     Float?
+  longitude    Float?
+  availability InspectorAvailability @default(AVAILABLE)
+  rating       Float?                @default(0)
+  reviewCount  Int                   @default(0)
+  hourlyRate   Float?
+  isActive     Boolean               @default(true)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  specialties InspectorSpecialty[]
+  callLogs    CallLog[]
+
+  @@index([availability])
+  @@index([city])
+  @@index([isActive])
+}
+
+model InspectorSpecialty {
+  id          String                 @id @default(cuid())
+  inspectorId String
+  specialty   InspectorSpecialtyType
+  yearsExp    Int?
+  certified   Boolean                @default(false)
+
+  inspector Inspector @relation(fields: [inspectorId], references: [id], onDelete: Cascade)
+
+  @@unique([inspectorId, specialty])
+  @@index([specialty])
+}
+
+// ─── AI Calling & Voice ─────────────────────────────────────────────────────
+
+model VoiceProfile {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  voiceId        String // ElevenLabs voice ID (mock)
+  stability      Float    @default(0.5)
+  clarity        Float    @default(0.75)
+  style          Float    @default(0)
+  sampleAudioUrl String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  callLogs CallLog[]
+
+  @@index([userId])
+}
+
+enum CallStatus {
+  QUEUED
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  NO_ANSWER
+  BUSY
+  CANCELLED
+}
+
+model CallLog {
+  id              String        @id @default(cuid())
+  initiatorId     String
+  initiator       User          @relation("CallInitiator", fields: [initiatorId], references: [id])
+  recipientId     String?
+  recipient       User?         @relation("CallRecipient", fields: [recipientId], references: [id])
+  recipientPhone  String
+  recipientName   String?
+  inspectorId     String?
+  inspector       Inspector?    @relation(fields: [inspectorId], references: [id])
+  voiceProfileId  String?
+  voiceProfile    VoiceProfile? @relation(fields: [voiceProfileId], references: [id])
+  status          CallStatus    @default(QUEUED)
+  duration        Int? // seconds
+  recordingUrl    String?
+  transcription   String?       @db.Text
+  summary         String?       @db.Text
+  purpose         String?
+  scheduledCallId String?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([initiatorId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ScheduledCall {
+  id             String   @id @default(cuid())
+  creatorId      String
+  creator        User     @relation("ScheduledCallCreator", fields: [creatorId], references: [id])
+  recipientId    String?
+  recipient      User?    @relation("ScheduledCallRecipient", fields: [recipientId], references: [id])
+  recipientPhone String
+  recipientName  String?
+  purpose        String?
+  scheduledAt    DateTime
+  reminderBefore Int      @default(15) // minutes before
+  status         String   @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED, MISSED
+  voiceProfileId String?
+  notes          String?  @db.Text
+  callLogId      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([creatorId])
+  @@index([scheduledAt])
+  @@index([status])
+}
+
+// ─── Slack-like Chat ────────────────────────────────────────────────────────
+
+enum ChannelType {
+  GENERAL
+  WORK_ORDERS
+  CUSTOM
+  DIRECT_MESSAGE
+}
+
+model Channel {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  imageUrl    String?
+  type        ChannelType @default(CUSTOM)
+  isArchived  Boolean     @default(false)
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  members  ChannelMember[]
+  messages ChatMessage[]
+
+  @@index([type])
+}
+
+model ChannelMember {
+  id         String    @id @default(cuid())
+  channelId  String
+  userId     String
+  role       String    @default("MEMBER") // ADMIN, MEMBER
+  lastReadAt DateTime?
+  joinedAt   DateTime  @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+}
+
+enum ChatMessageType {
+  TEXT
+  FILE
+  IMAGE
+  AUDIO
+  VIDEO
+  SYSTEM
+}
+
+model ChatMessage {
+  id        String          @id @default(cuid())
+  content   String          @db.Text
+  type      ChatMessageType @default(TEXT)
+  channelId String
+  authorId  String
+  parentId  String? // for thread replies
+  fileUrl   String?
+  fileName  String?
+  fileSize  Int?
+  fileMime  String?
+  isEdited  Boolean         @default(false)
+  isDeleted Boolean         @default(false)
+
+  channel   Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User              @relation(fields: [authorId], references: [id])
+  parent    ChatMessage?      @relation("ChatThreadReplies", fields: [parentId], references: [id])
+  replies   ChatMessage[]     @relation("ChatThreadReplies")
+  reactions MessageReaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([channelId])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+model MessageReaction {
+  id        String @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+model TypingIndicator {
+  id        String   @id @default(cuid())
+  channelId String
+  userId    String
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+}
+
+// ─── Contractor Balance ──────────────────────────────────────────────────────
+
+model ContractorBalance {
+  id               String   @id @default(cuid())
+  contractorId     String   @unique
+  contractor       User     @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  totalEarned      Float    @default(0)
+  totalWithdrawn   Float    @default(0)
+  pendingAmount    Float    @default(0)
+  availableBalance Float    @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model BalanceTransaction {
+  id           String   @id @default(cuid())
+  contractorId String
+  contractor   User     @relation(fields: [contractorId], references: [id])
+  type         String // CREDIT, DEBIT, WITHDRAWAL, ADJUSTMENT
+  amount       Float
+  description  String
+  referenceId  String? // workOrderId or invoiceId
+  balanceAfter Float
+  createdAt    DateTime @default(now())
+
+  @@index([contractorId])
+  @@index([createdAt])
+}
+
+// ─── Disputes ────────────────────────────────────────────────────────────────
+
+model Dispute {
+  id               String     @id @default(cuid())
+  workOrderId      String?
+  workOrder        WorkOrder? @relation(fields: [workOrderId], references: [id])
+  raisedById       String
+  raisedBy         User       @relation("DisputeRaised", fields: [raisedById], references: [id])
+  assignedToId     String?
+  assignedTo       User?      @relation("DisputeAssigned", fields: [assignedToId], references: [id])
+  title            String
+  description      String     @db.Text
+  status           String     @default("OPEN") // OPEN, UNDER_REVIEW, RESOLVED, CLOSED
+  priority         String     @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  resolution       String?    @db.Text
+  adjustmentAmount Float?
+  adjustmentType   String? // CREDIT, DEBIT
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([status])
+  @@index([raisedById])
+}
+
+// ─── Withdrawals ─────────────────────────────────────────────────────────────
+
+model Withdrawal {
+  id              String    @id @default(cuid())
+  contractorId    String
+  contractor      User      @relation(fields: [contractorId], references: [id])
+  amount          Float
+  method          String // ACH, WIRE, PAYPAL, ZELLE, CHECK
+  status          String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, REJECTED
+  paymentDetails  Json? // method-specific details
+  processedAt     DateTime?
+  completedAt     DateTime?
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([contractorId])
+  @@index([status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTRACTOR NETWORK COLLABORATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Feed Posts ──────────────────────────────────────────────────────────────
+
+enum PostCategory {
+  GENERAL
+  WORK_RELATED
+  HELP_NEEDED
+  URGENT
+  ANNOUNCEMENT
+  JOB_COVERAGE
+}
+
+enum PostStatus {
+  ACTIVE
+  CLOSED
+  ARCHIVED
+  FLAGGED
+  REMOVED
+}
+
+model Post {
+  id       String       @id @default(cuid())
+  title    String
+  content  String       @db.Text
+  category PostCategory @default(GENERAL)
+  status   PostStatus   @default(ACTIVE)
+  authorId String
+  author   User         @relation("PostAuthor", fields: [authorId], references: [id])
+
+  // Work Order linking
+  workOrderId String?
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+
+  // Location
+  location  String?
+  city      String?
+  state     String?
+  zipCode   String?
+  latitude  Float?
+  longitude Float?
+
+  // Tags & metadata
+  tags      String[] @default([])
+  isPinned  Boolean  @default(false)
+  isUrgent  Boolean  @default(false)
+  viewCount Int      @default(0)
+
+  // Relations
+  comments    PostComment[]
+  reactions   PostReaction[]
+  attachments PostAttachment[]
+  jobRequest  JobRequest?
+  reports     PostReport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([authorId])
+  @@index([category])
+  @@index([status])
+  @@index([workOrderId])
+  @@index([createdAt])
+  @@index([latitude, longitude])
+}
+
+model PostAttachment {
+  id           String  @id @default(cuid())
+  postId       String
+  post         Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  url          String?
+  thumbnailUrl String?
+  uploaderId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
+
+model PostComment {
+  id       String        @id @default(cuid())
+  content  String        @db.Text
+  postId   String
+  post     Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User          @relation("CommentAuthor", fields: [authorId], references: [id])
+  parentId String?
+  parent   PostComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies  PostComment[] @relation("CommentReplies")
+  isPinned Boolean       @default(false)
+  isUrgent Boolean       @default(false)
+
+  reactions PostReaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+enum ReactionType {
+  LIKE
+  HELPFUL
+  URGENT
+  LOVE
+  THUMBS_UP
+  THUMBS_DOWN
+}
+
+model PostReaction {
+  id        String       @id @default(cuid())
+  type      ReactionType @default(LIKE)
+  userId    String
+  user      User         @relation("ReactionUser", fields: [userId], references: [id])
+  postId    String?
+  post      Post?        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId String?
+  comment   PostComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId, type])
+  @@unique([userId, commentId, type])
+  @@index([postId])
+  @@index([commentId])
+}
+
+// ─── Job Coverage Marketplace ────────────────────────────────────────────────
+
+enum JobRequestStatus {
+  OPEN
+  OFFERED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum UrgencyLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model JobRequest {
+  id          String @id @default(cuid())
+  postId      String @unique
+  post        Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  requesterId String
+  requester   User   @relation("JobRequester", fields: [requesterId], references: [id])
+
+  // Work Order
+  workOrderId String?
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+
+  // Job details
+  scopeOfWork String           @db.Text
+  budget      Float?
+  deadline    DateTime?
+  urgency     UrgencyLevel     @default(MEDIUM)
+  status      JobRequestStatus @default(OPEN)
+
+  // Location
+  location  String
+  city      String?
+  state     String?
+  zipCode   String?
+  latitude  Float?
+  longitude Float?
+
+  // Assignment
+  assignedToId  String?
+  assignedTo    User?     @relation("JobAssignedTo", fields: [assignedToId], references: [id])
+  assignedAt    DateTime?
+  completedAt   DateTime?
+  adminApproved Boolean   @default(false)
+  approvedById  String?
+  approvedBy    User?     @relation("JobApprovedBy", fields: [approvedById], references: [id])
+
+  // Offers
+  offers JobOffer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([requesterId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([urgency])
+  @@index([deadline])
+  @@index([latitude, longitude])
+}
+
+model JobOffer {
+  id               String     @id @default(cuid())
+  jobRequestId     String
+  jobRequest       JobRequest @relation(fields: [jobRequestId], references: [id], onDelete: Cascade)
+  offerorId        String
+  offeror          User       @relation("JobOfferor", fields: [offerorId], references: [id])
+  message          String?    @db.Text
+  proposedBudget   Float?
+  proposedDeadline DateTime?
+  status           String     @default("PENDING") // PENDING, ACCEPTED, REJECTED, WITHDRAWN
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([jobRequestId, offerorId])
+  @@index([jobRequestId])
+  @@index([offerorId])
+}
+
+// ─── Reputation System ───────────────────────────────────────────────────────
+
+model ContractorProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("ContractorProfile", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Stats
+  completedJobs    Int   @default(0)
+  totalJobs        Int   @default(0)
+  avgRating        Float @default(0)
+  totalRatings     Int   @default(0)
+  reliabilityScore Float @default(100) // 0-100
+  responseTime     Int   @default(0) // avg minutes
+
+  // Badges
+  badges ContractorBadge[]
+
+  // Bio & skills
+  bio           String?  @db.Text
+  skills        String[] @default([])
+  specialties   String[] @default([])
+  serviceRadius Int      @default(50) // miles
+  isAvailable   Boolean  @default(true)
+  hourlyRate    Float?
+
+  // Location (base of operations)
+  address   String?
+  city      String?
+  state     String?
+  zipCode   String?
+  latitude  Float?
+  longitude Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([avgRating])
+  @@index([reliabilityScore])
+  @@index([latitude, longitude])
+  @@index([isAvailable])
+}
+
+enum BadgeType {
+  TOP_VENDOR
+  FAST_RESPONDER
+  TRUSTED
+  RISING_STAR
+  QUALITY_WORK
+  FIVE_STAR
+  COMPLETED_10
+  COMPLETED_50
+  COMPLETED_100
+}
+
+model ContractorBadge {
+  id          String            @id @default(cuid())
+  profileId   String
+  profile     ContractorProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  type        BadgeType
+  label       String
+  description String?
+  earnedAt    DateTime          @default(now())
+
+  @@unique([profileId, type])
+  @@index([profileId])
+}
+
+model Rating {
+  id            String  @id @default(cuid())
+  ratedId       String
+  ratedUser     User    @relation("RatedUser", fields: [ratedId], references: [id])
+  raterId       String
+  raterUser     User    @relation("RaterUser", fields: [raterId], references: [id])
+  workOrderId   String?
+  score         Int // 1-5
+  comment       String? @db.Text
+  punctuality   Int? // 1-5
+  quality       Int? // 1-5
+  communication Int? // 1-5
+
+  createdAt DateTime @default(now())
+
+  @@unique([ratedId, raterId, workOrderId])
+  @@index([ratedId])
+  @@index([raterId])
+}
+
+// ─── Moderation ──────────────────────────────────────────────────────────────
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  INAPPROPRIATE
+  FRAUD
+  MISINFORMATION
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+model PostReport {
+  id           String       @id @default(cuid())
+  postId       String
+  post         Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporterId   String
+  reporter     User         @relation("ReportReporter", fields: [reporterId], references: [id])
+  reason       ReportReason
+  description  String?      @db.Text
+  status       ReportStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   User?        @relation("ReportReviewer", fields: [reviewedById], references: [id])
+  resolution   String?      @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([postId, reporterId])
+  @@index([postId])
+  @@index([status])
+}
+
+// ─── Extend User model ──────────────────────────────────────────────────────
+// Note: User model relations are added via separate relation fields above
+// The following are referenced but defined via @relation in their respective models:
+// - PostAuthor, CommentAuthor, ReactionUser
+// - JobRequester, JobAssignedTo, JobApprovedBy, JobOfferor
+// - ContractorProfile
+// - RatedUser, RaterUser
+// - ReportReporter, ReportReviewer
